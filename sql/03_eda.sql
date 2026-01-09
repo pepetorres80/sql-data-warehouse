@@ -7,7 +7,9 @@ Incluye comentarios de insights de negocio.
 
 -- 0) Chequeo rápido de calidad / integridad
 -- ----------------------------------------
--- ¿Cuántas filas en cada tabla?
+-- OBJETIVO: validar que el modelo está cargado y el volumen es suficiente.
+-- INSIGHT: si la fact table tiene cientos/miles de líneas, el EDA será estable
+--          (evitas conclusiones “ruidosas” por falta de datos).
 SELECT 'dim_calendar' AS table_name, COUNT(*) AS rows FROM dim_calendar
 UNION ALL SELECT 'dim_store', COUNT(*) FROM dim_store
 UNION ALL SELECT 'dim_product', COUNT(*) FROM dim_product
@@ -18,9 +20,9 @@ UNION ALL SELECT 'fact_sales', COUNT(*) FROM fact_sales;
 
 -- 1) JOIN (INNER) básico: ingresos por provincia y mes
 -- ----------------------------------------------------
-/*
-Insight: detectas provincias/meses fuertes y estacionalidad.
-*/
+-- OBJETIVO: medir revenue, tickets y ticket medio por mes.
+-- INSIGHT: identifica estacionalidad y evolución del negocio (subidas/caídas).
+-- DECISIÓN: ajustar surtido / pricing / campañas si un mes cae o cambia el ticket medio.
 SELECT
   pv.province_name,
   dc.year_num,
@@ -37,10 +39,9 @@ ORDER BY dc.year_num, dc.month_num, revenue DESC;
 
 -- 2) LEFT JOIN: clientes sin compras (o sin compras en un periodo)
 -- ---------------------------------------------------------------
-/*
-Insight: base de clientes “durmiente” -> campañas reactivación.
-Ojo: en retail muchos tickets son anónimos, por eso customer_id puede ser NULL.
-*/
+-- OBJETIVO: detectar clientes “durmientes” (sin actividad).
+-- INSIGHT: base accionable para reactivación (email/SMS/cupones).
+-- NOTA: en retail es normal que existan tickets anónimos (customer_id puede ser NULL).
 SELECT
   c.customer_id,
   c.full_name,
@@ -52,9 +53,9 @@ WHERE fs.customer_id IS NULL
 
 -- 3) CASE: segmentación por nivel de descuento
 -- --------------------------------------------
-/*
-Insight: medir dependencia de descuentos y su impacto en margen.
-*/
+-- OBJETIVO: entender cómo se reparte el revenue por política de descuentos.
+-- INSIGHT: si el margen cae fuerte en descuentos medios/altos, hay riesgo de “comprar ventas”.
+-- DECISIÓN: limitar descuentos medios/altos a productos con margen suficiente o campañas puntuales.
 SELECT
   CASE
     WHEN fs.discount_pct = 0 THEN 'SIN_DESCUENTO'
@@ -71,9 +72,9 @@ ORDER BY revenue DESC;
 
 -- 4) Subquery: Top productos por ingresos (global)
 -- -----------------------------------------------
-/*
-Insight: “qué productos tiran del negocio”.
-*/
+-- OBJETIVO: ranking de productos por revenue total.
+-- INSIGHT: identifica “drivers” (productos que tiran del negocio).
+-- DECISIÓN: priorizar stock/visibilidad, y diseñar cross-sell alrededor de estos tops.
 SELECT *
 FROM (
   SELECT
@@ -89,10 +90,9 @@ LIMIT 5;
 
 -- 5) CTE encadenadas + ventana: Top categoría por provincia
 -- ---------------------------------------------------------
-/*
-Insight: cada provincia/tienda puede tener mix distinto.
-Esto sirve para surtido y pricing local.
-*/
+-- OBJETIVO: detectar el mix dominante por territorio.
+-- INSIGHT: cada provincia/canal puede tener un mix distinto (preferencias de compra).
+-- DECISIÓN: ajustar surtido y pricing local (especialmente útil si crece a varias provincias).
 WITH revenue_by_prov_cat AS (
   SELECT
     pv.province_name,
@@ -120,9 +120,9 @@ ORDER BY revenue DESC;
 
 -- 6) Ventana: acumulado mensual (running total) por tienda
 -- --------------------------------------------------------
-/*
-Insight: tendencia y crecimiento (o caída) por canal.
-*/
+-- OBJETIVO: visualizar crecimiento/caída acumulada por canal/tienda.
+-- INSIGHT: el running total permite detectar puntos de inflexión temporal de forma clara.
+-- DECISIÓN: si un canal se estanca, activar acciones comerciales específicas (online vs físico).
 WITH by_month AS (
   SELECT
     st.store_name,
@@ -145,9 +145,9 @@ ORDER BY store_name, year_num, month_num;
 
 -- 7) Funciones de fecha + CAST: ventas fin de semana vs laborable
 -- ---------------------------------------------------------------
-/*
-Insight: si el finde “peta”, ajustas turnos y stock.
-*/
+-- OBJETIVO: comparar comportamiento de compra en fin de semana vs laborables.
+-- INSIGHT: útil para dimensionar personal, stock y horarios.
+-- DECISIÓN: si el finde sube el importe medio, aplicar upsell (bebidas/snacks) o packs.
 SELECT
   dc.is_weekend,
   COUNT(DISTINCT fs.ticket_id) AS tickets,
@@ -160,9 +160,9 @@ ORDER BY revenue DESC;
 
 -- 8) 3 JOINs usando la VIEW: ingresos por método de pago y tipo de tienda
 -- -----------------------------------------------------------------------
-/*
-Insight: preferencia de pago por canal (bar vs estanco vs online).
-*/
+-- OBJETIVO: analizar mix de pago por canal (bar/estanco/online).
+-- INSIGHT: preferencias de pago impactan comisiones, flujo de caja y UX.
+-- DECISIÓN: promover métodos más rentables o más cómodos según el canal.
 SELECT
   store_type,
   payment_method,
@@ -174,24 +174,23 @@ ORDER BY revenue DESC;
 
 -- 9) Consulta a la FUNCIÓN (KPIs)
 -- -------------------------------
-/*
-Insight: KPIs directos para reporting.
-*/
+-- OBJETIVO: encapsular KPIs por tienda y rango temporal (reutilizable en reporting).
+-- INSIGHT: simplifica cuadros de mando y consultas repetitivas.
+-- DECISIÓN: comparar rendimiento entre tiendas y periodos sin reescribir SQL.
 SELECT * FROM fn_store_kpis(
   (SELECT store_id FROM dim_store WHERE store_name='Estanco Centro' AND city='Salobreña'),
   '2025-01-01',
   '2025-03-31'
 );
 
--- 10) Resultado final: “tabla resumen” (puede ser VIEW si quieres)
--- ---------------------------------------------------------------
-/*
-Esta salida es perfecta para la entrega: provincia, mes, categoría, revenue, margen, ticket medio.
-Decisiones de negocio:
-- Ajustar surtido por provincia/mes
-- Revisar descuentos si margen cae
-- Reforzar plantilla en picos (finde / meses fuertes)
-*/
+-- 10) Resultado final: “tabla resumen” (ideal para entrega / reporting)
+-- --------------------------------------------------------------------
+-- OBJETIVO: salida agregada lista para decisiones (provincia, mes, categoría).
+-- MÉTRICAS: tickets, revenue, margen bruto, ticket medio.
+-- DECISIONES:
+--   - Ajustar surtido por provincia/mes (mix por categoría)
+--   - Revisar descuentos si el margen cae
+--   - Planificar personal/stock en picos (fines de semana / meses fuertes)
 WITH base AS (
   SELECT
     pv.province_name,
