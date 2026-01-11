@@ -58,13 +58,15 @@ Campos clave:
 ## 4. Cómo ejecutar (desde cero)
 
 ### 4.1 Levantar PostgreSQL con Docker
+
 ```bash
 docker compose up -d
+```
+### 4.2 Ejecutar scripts en orden
 
-###4.2 Ejecutar scripts en orden
+**Nota:** usar `ON_ERROR_STOP=1` para abortar ante cualquier fallo.
 
-Nota: usar ON_ERROR_STOP=1 para abortar ante cualquier fallo.
-
+```bash
 # 1) Esquema + constraints + índices + vista + función
 docker exec -it sql_mod_postgres psql -U torres -d sql_mod -v ON_ERROR_STOP=1 -f /sql/01_schema.sql
 
@@ -76,103 +78,306 @@ docker exec -it sql_mod_postgres psql -U torres -d sql_mod -v ON_ERROR_STOP=1 -f
 
 # 4) Seed fact_sales (determinista, escalable)
 docker exec -it sql_mod_postgres psql -U torres -d sql_mod -v ON_ERROR_STOP=1 -f /sql/05_seed_fact_sales.sql
-
+```
 # 5) EDA (core)
 docker exec -it sql_mod_postgres psql -U torres -d sql_mod -P pager=off -f /sql/03_eda.sql
 
-##5. Dataset simulado (reproducible)
+## 5. Dataset simulado (reproducible)
 
-El seed genera:
+El conjunto de datos se genera de forma **determinista y reproducible** mediante scripts SQL, permitiendo repetir los análisis y validar resultados sin variaciones entre ejecuciones.
 
-500 tickets
+### Volumen y granularidad
 
-~1.200–1.600 líneas de venta (1–4 líneas por ticket)
+- **500 tickets** generados
+- **~1.200–1.600 líneas de venta**  
+  (entre **1 y 4 líneas por ticket**)
+- **Granularidad:** línea de ticket (producto vendido)
 
-Ventas repartidas en enero–marzo 2025
+### Distribución temporal
 
-Reparto por tienda (round-robin) y por método de pago (25% cada uno)
+- Ventas repartidas entre **enero y marzo de 2025**
+- Calendario generado previamente mediante `seed_calendar`
+- Permite análisis por:
+  - mes
+  - día
+  - día de la semana
+  - fin de semana vs laborable
 
-Ejemplo de reparto observado:
+### Distribución por tienda
 
-Bar Costa: ~167 tickets
+Asignación **round-robin** para evitar sesgos:
 
-Estanco Centro: ~167 tickets
+- **Bar Costa:** ~167 tickets  
+- **Estanco Centro:** ~167 tickets  
+- **Tienda Online:** ~166 tickets  
 
-Tienda Online: ~166 tickets
+Esta distribución permite comparativas homogéneas entre tiendas.
 
-Métodos de pago:
+### Distribución por método de pago
 
-EFECTIVO / TARJETA / BIZUM / ONLINE ≈ 125 tickets cada uno
+Reparto equilibrado (≈25% cada uno):
+
+- **EFECTIVO**
+- **TARJETA**
+- **BIZUM**
+- **ONLINE**
+
+≈ **125 tickets por método de pago**, facilitando análisis comparativos de comportamiento y canal.
+
+### Precios, costes y descuentos
+
+- Precio y coste capturados como **snapshot** en la tabla de hechos
+- Descuentos aplicados de forma controlada:
+  - `SIN_DESCUENTO`
+  - `DESCUENTO_BAJO`
+  - `DESCUENTO_MEDIO`
+- Permite análisis realistas de:
+  - revenue
+  - margen bruto
+  - impacto de promociones
+
+### Objetivo del dataset
+
+El dataset está diseñado para:
+
+- Simular un entorno **retail realista**
+- Soportar **EDA avanzado**
+- Permitir extracción de **KPIs de negocio**
+- Servir como base para ampliaciones futuras (más tiendas, clientes, promociones)
+
+El enfoque prioriza **calidad analítica**, **coherencia dimensional** y **facilidad de reproducción**.
 
 ## 6. KPIs e insights (EDA)
+
+El análisis exploratorio de datos (EDA) tiene como objetivo convertir los datos de ventas en **información accionable**, identificando patrones, tendencias y palancas clave de negocio.
+
+Los KPIs se calculan sobre la vista `vw_sales_enriched`, lo que garantiza consistencia dimensional y simplifica las consultas analíticas.
+
+---
+
 ### 6.1 Tendencia mensual
 
-Revenue y nº tickets por mes
+**KPIs analizados:**
+- Revenue mensual
+- Número de tickets
+- Ticket medio (`revenue / tickets`)
 
-Ticket medio (revenue / tickets)
+**Insight:**
+- Identificación de crecimiento o caída del revenue.
+- Detección de cambios en el comportamiento del cliente a través del ticket medio.
 
-Decisión: detectar caída de revenue o cambios de ticket medio y ajustar mix/promos.
+**Decisión de negocio:**
+- Ajustar mix de productos y promociones.
+- Corregir desviaciones tempranas en ventas.
 
-6.2 Impacto de descuentos
+---
 
-Segmentación por buckets (SIN_DESCUENTO, BAJO, MEDIO) comparando:
+### 6.2 Impacto de descuentos
 
-revenue
+Segmentación por *buckets* de descuento:
+- `SIN_DESCUENTO`
+- `DESCUENTO_BAJO`
+- `DESCUENTO_MEDIO`
 
-margen bruto
+**KPIs analizados:**
+- Revenue
+- Margen bruto
+- Porcentaje de margen
 
-Decisión: definir política de descuentos maximizando margen.
+**Insight:**
+- Evaluar si los descuentos incrementan volumen a costa de margen.
+- Identificar el punto óptimo de descuento.
 
-6.3 Productos top
+**Decisión de negocio:**
+- Definir una política de descuentos orientada a maximizar margen total.
+- Eliminar descuentos no rentables.
 
-Ranking de productos y categorías por revenue.
+---
 
-Decisión: priorizar stock/rotación y cross-sell.
+### 6.3 Productos y categorías top
 
-6.4 Finde vs laborable
+**KPIs analizados:**
+- Revenue por producto
+- Revenue por categoría
+- Margen bruto por producto
 
-Comparativa usando is_weekend.
+**Insight:**
+- Identificación de productos y categorías con mayor aportación al negocio.
+- Detección de productos de alta rotación y alto margen.
 
-Decisión: activar campañas de upsell en fines de semana.
+**Decisión de negocio:**
+- Priorizar stock y reposición.
+- Diseñar estrategias de *cross-sell* y *upsell*.
 
-6.5 Comparativa por tienda y método de pago
+---
 
-Revenue/tickets por tienda
+### 6.4 Fin de semana vs días laborables
 
-Revenue/tickets por método de pago
+Comparativa basada en el atributo `is_weekend`.
 
-Decisión: optimizar canal online, analizar comisiones, preferencias de pago.
+**KPIs analizados:**
+- Revenue
+- Número de tickets
+- Ticket medio
 
-7. Objetos SQL destacados
+**Insight:**
+- Diferencias claras de comportamiento entre días laborables y fines de semana.
 
-VIEW: vw_sales_enriched (ventas enriquecidas con dimensiones).
+**Decisión de negocio:**
+- Activar campañas específicas en fines de semana.
+- Ajustar horarios y recursos operativos.
 
-FUNCIÓN: fn_store_kpis(p_store_id, p_start_date, p_end_date) devuelve KPIs por tienda y rango.
+---
 
-ÍNDICES: sobre claves frecuentes para JOIN/filtrado (ej. fecha/tienda/ticket).
+### 6.5 Comparativa por tienda y método de pago
 
-8. Guion de presentación (10 min)
+**KPIs analizados:**
+- Revenue y tickets por tienda
+- Revenue y tickets por método de pago
+- Ticket medio por canal
 
-Contexto y objetivo (30s)
+**Insight:**
+- Identificación de tiendas con mejor rendimiento.
+- Análisis de preferencias de pago del cliente.
 
-Modelo dimensional y granularidad (2 min)
+**Decisión de negocio:**
+- Optimizar el canal online.
+- Evaluar costes y comisiones de los métodos de pago.
+- Adaptar la oferta a los hábitos del cliente.
 
-Integridad (PK/FK/constraints) + decisión de snapshots (1 min)
+---
 
-Seed reproducible + volumen (1 min)
+### Conclusión del EDA
 
-EDA (4 min): tendencia mensual, descuentos vs margen, top productos, finde vs laborable, comparativa por tienda/pago
+El EDA permite:
+- Validar la coherencia del modelo dimensional.
+- Extraer KPIs clave de negocio.
+- Transformar datos en decisiones operativas y estratégicas.
 
-Decisiones de negocio (1.5 min)
+Este análisis constituye la base para futuras ampliaciones analíticas y modelos más avanzados.
 
-Cierre + mejoras futuras (30s)
+## 7. Objetos SQL destacados
 
-9. Mejoras futuras
+El proyecto incorpora distintos objetos SQL diseñados para **facilitar el análisis**, **optimizar el rendimiento** y **reutilizar lógica de negocio**, siguiendo buenas prácticas de modelado dimensional.
 
-Añadir más tiendas/provincias y ampliar calendario a año completo.
+---
 
-Segmentar clientes (RFM), cohortes, fidelización.
+### 7.1 Vista analítica
 
-Modelar devoluciones y promociones avanzadas.
+**VIEW:** `vw_sales_enriched`
 
-Introducir costes de pago (comisiones) y medir margen neto real.
+Vista de ventas enriquecidas que integra la tabla de hechos con todas las dimensiones relevantes.
+
+**Características:**
+- JOINs predefinidos con:
+  - calendario
+  - tienda
+  - producto
+  - cliente (opcional)
+  - empleado
+  - método de pago
+- Campos derivados:
+  - `is_weekend`
+  - revenue
+  - margen bruto
+- Simplifica las consultas de EDA y reporting
+
+**Beneficio:**
+- Reduce complejidad SQL
+- Asegura consistencia analítica
+- Acelera el desarrollo de KPIs
+
+---
+
+### 7.2 Función de KPIs por tienda
+
+**FUNCIÓN:** `fn_store_kpis(p_store_id, p_start_date, p_end_date)`
+
+Función SQL que devuelve los principales KPIs de una tienda para un rango temporal dado.
+
+**KPIs devueltos:**
+- Revenue total
+- Número de tickets
+- Ticket medio
+- Margen bruto
+
+**Casos de uso:**
+- Análisis por tienda
+- Comparativas temporales
+- Integración con dashboards o BI
+
+**Beneficio:**
+- Reutilización de lógica
+- Parametrización cla
+
+## 8. Guion de presentación (10 minutos)
+
+### 1. Contexto y objetivo (30 segundos)
+- Presentación del problema de negocio
+- Necesidad de un modelo de datos que permita análisis fiables de ventas
+- Objetivo: transformar datos transaccionales en información accionable
+
+---
+
+### 2. Modelo dimensional y granularidad (2 minutos)
+- Elección de un modelo **Star Schema**
+- Tabla de hechos con granularidad a **línea de ticket**
+- Dimensiones desacopladas para:
+  - calendario
+  - tienda
+  - producto
+  - cliente
+  - empleado
+  - método de pago
+- Ventaja: simplicidad analítica y escalabilidad
+
+---
+
+### 3. Integridad y diseño histórico (1 minuto)
+- Uso de **PK/FK** y constraints para garantizar
+
+## 9. Mejoras futuras
+
+El modelo ha sido diseñado con un enfoque **escalable y evolutivo**, permitiendo incorporar nuevas dimensiones, métricas y casos de uso sin rehacer la base existente.
+
+### 9.1 Ampliación del alcance
+
+- Añadir nuevas tiendas y provincias
+- Extender el calendario a un ejercicio completo o multianual
+- Incrementar volumen de datos para pruebas de rendimiento
+
+### 9.2 Analítica de clientes
+
+- Incorporar segmentación **RFM** (Recencia, Frecuencia, Monetary)
+- Análisis de cohortes y fidelización
+- Identificación de clientes de alto valor
+
+### 9.3 Promociones y devoluciones
+
+- Modelar devoluciones como evento independiente
+- Soportar promociones avanzadas:
+  - descuentos acumulativos
+  - campañas temporales
+  - cupones
+- Medición del impacto real de promociones sobre margen
+
+### 9.4 Optimización de margen real
+
+- Introducir costes por método de pago (comisiones)
+- Cálculo de margen neto real
+- Comparativa entre revenue bruto y rentabilidad efectiva
+
+### 9.5 Evolución hacia BI y Data Science
+
+- Integración con herramientas BI (Power BI, Tableau, Metabase)
+- Automatización de KPIs
+- Base para modelos predictivos:
+  - previsión de ventas
+  - detección de anomalías
+  - optimización de descuentos
+
+---
+
+### Cierre
+
+Estas mejoras permitirían evolucionar el proyecto desde un **modelo analítico sólido** hacia una **plataforma completa de Business Intelligence y Data Analytics**, alineada con necesidades reales de negocio.
